@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>跨模态关联实验 - 数据采集版</title>
+    <style>
+        body { margin: 0; background-color: #222; color: white; font-family: sans-serif; display: flex; flex-direction: column; justify-content: center; align-items: center; height: 100vh; overflow: hidden; user-select: none; }
+        #start-btn { width: 120px; height: 120px; background-color: white; cursor: pointer; display: none; box-shadow: 0 0 20px rgba(255,255,255,0.2); z-index: 10; }
+        #choice-grid { display: none; grid-template-columns: repeat(3, 110px); grid-gap: 20px; }
+        .stimulus-img { width: 100px; height: 100px; cursor: pointer; border: 3px solid transparent; border-radius: 8px; transition: transform 0.1s; }
+        .stimulus-img:active { transform: scale(0.9); }
+        #feedback { display: none; position: absolute; font-size: 120px; font-weight: bold; pointer-events: none; z-index: 20; }
+        .correct { color: #4CAF50; }
+        .incorrect { color: #F44336; }
+        #status-text { position: absolute; top: 10%; color: #aaa; text-align: center; width: 80%; }
+        #loader { font-size: 18px; color: #55acee; }
+        
+        /* 下载按钮样式 */
+        #download-btn { position: absolute; bottom: 20px; padding: 10px 20px; background: #444; color: #ccc; border: 1px solid #666; cursor: pointer; border-radius: 5px; font-size: 14px; }
+        #download-btn:hover { background: #555; color: white; }
+    </style>
+</head>
+<body>
+
+    <div id="status-text">正在初始化资源...</div>
+    <div id="loader">0%</div>
+    
+    <div id="start-btn"></div>
+    <div id="choice-grid"></div>
+    <div id="feedback"></div>
+
+    <button id="download-btn" onclick="exportToCSV()">下载实验数据 (CSV)</button>
+
+    <script>
+        const audioPath = 'Auditory_Stimuli_Harmonics/'; 
+        const imagePath = 'Visual_Stimuli_Balanced/';
+        
+        const stimuli = [
+            { id: 1, name: 'S1_Circle_Blue' }, { id: 2, name: 'S2_Circle_Yellow' }, { id: 3, name: 'S3_Circle_Red' },
+            { id: 4, name: 'S4_Square_Blue' }, { id: 5, name: 'S5_Square_Yellow' }, { id: 6, name: 'S6_Square_Red' },
+            { id: 7, name: 'S7_Triangle_Blue' }, { id: 8, name: 'S8_Triangle_Yellow' }, { id: 9, name: 'S9_Triangle_Red' }
+        ];
+
+        let results = []; // 存储所有试次数据
+        let trialCount = 0;
+        let loadedCount = 0;
+        let currentTarget = null;
+        let showChoiceTime = 0; // 用于计算反应时
+
+        // 资源预加载
+        function preload() {
+            const totalAssets = stimuli.length * 2;
+            stimuli.forEach(item => {
+                const img = new Image();
+                img.src = `${imagePath}${item.name}.png`;
+                img.onload = () => { loadedCount++; updateProgress(totalAssets); };
+                
+                const audio = new Audio();
+                audio.src = `${audioPath}${item.name}_Harm.wav`;
+                audio.oncanplaythrough = () => { loadedCount++; updateProgress(totalAssets); };
+            });
+        }
+
+        function updateProgress(total) {
+            const percent = Math.round((loadedCount / total) * 100);
+            document.getElementById('loader').innerText = percent + "%";
+            if (loadedCount >= total) {
+                document.getElementById('loader').style.display = 'none';
+                document.getElementById('start-btn').style.display = 'block';
+                document.getElementById('status-text').innerText = "点击白色方块开始实验";
+            }
+        }
+
+        // 实验控制逻辑
+        const startBtn = document.getElementById('start-btn');
+        const choiceGrid = document.getElementById('choice-grid');
+        const feedback = document.getElementById('feedback');
+        const statusText = document.getElementById('status-text');
+
+        startBtn.onclick = function() {
+            startBtn.style.display = 'none';
+            statusText.innerText = "聆听声音刺激...";
+            currentTarget = stimuli[Math.floor(Math.random() * stimuli.length)];
+            
+            const audio = new Audio(`${audioPath}${currentTarget.name}_Harm.wav`);
+            audio.play();
+
+            audio.onended = () => {
+                statusText.innerText = "延迟期 (1000ms)";
+                setTimeout(() => { showChoices(); }, 1000);
+            };
+        };
+
+        function showChoices() {
+            choiceGrid.innerHTML = '';
+            statusText.innerText = "请选择对应的图形";
+            const displayOrder = [...stimuli].sort(() => Math.random() - 0.5);
+            
+            displayOrder.forEach(item => {
+                const img = document.createElement('img');
+                img.src = `${imagePath}${item.name}.png`;
+                img.className = 'stimulus-img';
+                img.onclick = () => handleChoice(item.id, item.name);
+                choiceGrid.appendChild(img);
+            });
+            
+            choiceGrid.style.display = 'grid';
+            showChoiceTime = performance.now(); // 记录呈现时间点
+        }
+
+        function handleChoice(selectedId, selectedName) {
+            const rt = Math.round(performance.now() - showChoiceTime); // 计算毫秒反应时
+            choiceGrid.style.display = 'none';
+            feedback.style.display = 'block';
+            trialCount++;
+
+            const isCorrect = (selectedId === currentTarget.id);
+            
+            // 记录数据
+            results.push({
+                Trial: trialCount,
+                Target_Name: currentTarget.name,
+                Selected_Name: selectedName,
+                Is_Correct: isCorrect ? 1 : 0,
+                ReactionTime_ms: rt
+            });
+
+            if (isCorrect) {
+                feedback.innerHTML = '✔';
+                feedback.className = 'correct';
+            } else {
+                feedback.innerHTML = '✘';
+                feedback.className = 'incorrect';
+            }
+
+            setTimeout(() => {
+                feedback.style.display = 'none';
+                startBtn.style.display = 'block';
+                statusText.innerText = `试次 ${trialCount} 已完成，点击白片继续`;
+            }, 5000);
+        }
+
+        // 导出数据为 CSV
+        function exportToCSV() {
+            if (results.length === 0) {
+                alert("还没有任何试次数据可以导出。");
+                return;
+            }
+            
+            let csvContent = "data:text/csv;charset=utf-8,";
+            csvContent += "Trial,Target_Name,Selected_Name,Is_Correct,ReactionTime_ms\n";
+            
+            results.forEach(r => {
+                csvContent += `${r.Trial},${r.Target_Name},${r.Selected_Name},${r.Is_Correct},${r.ReactionTime_ms}\n`;
+            });
+
+            const encodedUri = encodeURI(csvContent);
+            const link = document.createElement("a");
+            link.setAttribute("href", encodedUri);
+            link.setAttribute("download", "experiment_results.csv");
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+        }
+
+        window.onload = preload;
+    </script>
+</body>
+</html>
