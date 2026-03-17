@@ -3,15 +3,19 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>跨模态关联实验 - 移动端优化版</title>
+    <title>跨模态关联实验 - 图片反馈稳定版</title>
     <style>
         body { margin: 0; background-color: #222; color: white; font-family: sans-serif; display: flex; flex-direction: column; justify-content: center; align-items: center; height: 100vh; overflow: hidden; user-select: none; -webkit-tap-highlight-color: transparent; }
         #start-btn { width: 120px; height: 120px; background-color: white; cursor: pointer; display: none; box-shadow: 0 0 20px rgba(255,255,255,0.2); z-index: 10; border-radius: 10px; }
         #choice-grid { display: none; grid-template-columns: repeat(3, 100px); grid-gap: 15px; }
         .stimulus-img { width: 90px; height: 90px; cursor: pointer; border: 3px solid transparent; border-radius: 8px; }
-        #feedback { display: none; position: absolute; font-size: 100px; font-weight: bold; pointer-events: none; z-index: 20; }
-        .correct { color: #4CAF50; }
-        .incorrect { color: #F44336; }
+        
+        /* 修改反馈图层样式，使其适应图片 */
+        #feedback { display: none; position: absolute; pointer-events: none; z-index: 20; }
+        
+        /* 核心：反馈图片的尺寸设为 80px，保持视觉量感一致 */
+        #feedback-img { width: 80px; height: 80px; filter: drop-shadow(0 0 10px rgba(0,0,0,0.5)); }
+
         #status-text { position: absolute; top: 10%; color: #aaa; text-align: center; width: 90%; font-size: 16px; line-height: 1.5; }
         #loader { font-size: 24px; color: #55acee; font-weight: bold; margin-bottom: 20px; }
         #force-start { margin-top: 20px; padding: 10px 20px; background: #444; color: #888; border: none; border-radius: 5px; cursor: pointer; display: none; }
@@ -25,7 +29,8 @@
     
     <div id="start-btn"></div>
     <div id="choice-grid"></div>
-    <div id="feedback"></div>
+    
+    <div id="feedback"><img id="feedback-img" src="" alt="feedback"></div>
 
     <script>
         const audioPath = 'Auditory_Stimuli_Harmonics/'; 
@@ -43,7 +48,7 @@
         const CRITERION = 20;
         
         let loadedCount = 0;
-        const totalAssets = stimuli.length * 2;
+        const totalAssets = stimuli.length * 2 + 2; // +2 是为了算上勾叉图片
         let currentTarget = null;
         let showChoiceTime = 0;
 
@@ -52,7 +57,6 @@
             const percent = Math.round((loadedCount / totalAssets) * 100);
             document.getElementById('loader').innerText = percent + "%";
             
-            // 超过 5 秒还没加载完，显示强制进入按钮
             if (percent >= 30) {
                 document.getElementById('force-start').style.display = 'block';
             }
@@ -62,20 +66,33 @@
             }
         }
 
+        // 优先加载反馈图
+        function preloadFeedback() {
+            const correctImg = new Image();
+            correctImg.onload = updateProgress;
+            correctImg.onerror = updateProgress;
+            correctImg.src = 'correct.png';
+
+            const incorrectImg = new Image();
+            incorrectImg.onload = updateProgress;
+            incorrectImg.onerror = updateProgress;
+            incorrectImg.src = 'incorrect.png';
+        }
+
         function preload() {
+            preloadFeedback(); // 先加载反馈图
+
             stimuli.forEach(item => {
-                // 加载图片
                 const img = new Image();
                 img.onload = updateProgress;
-                img.onerror = updateProgress; // 即使报错也继续，防止卡死
+                img.onerror = updateProgress;
                 img.src = `${imagePath}${item.name}.png`;
                 
-                // 加载音频 (移动端优化)
                 const audio = new Audio();
                 audio.oncanplaythrough = updateProgress;
                 audio.onerror = updateProgress;
                 audio.src = `${audioPath}${item.name}_Harm.wav`;
-                audio.load(); // 显式调用加载
+                audio.load();
             });
         }
 
@@ -90,25 +107,23 @@
             initExperiment();
         }
 
-        // --- 核心逻辑部分 (保持 5s 延迟和 20 连对规则) ---
         const startBtn = document.getElementById('start-btn');
         const choiceGrid = document.getElementById('choice-grid');
         const feedback = document.getElementById('feedback');
+        const feedbackImg = document.getElementById('feedback-img');
         const statusText = document.getElementById('status-text');
 
         startBtn.onclick = function() {
             startBtn.style.display = 'none';
-            statusText.innerText = "聆听声音...";
+            statusText.innerText = "聆听声音刺激...";
             currentTarget = stimuli[Math.floor(Math.random() * stimuli.length)];
             
             const audio = new Audio(`${audioPath}${currentTarget.name}_Harm.wav`);
-            audio.play().catch(e => {
-                console.log("音频播放被拦截，尝试静音播放一次以解锁权限");
-            });
+            audio.play();
 
             audio.onended = () => {
                 statusText.innerText = "延迟期 (5s)";
-                setTimeout(() => { showChoices(); }, 5000);
+                setTimeout(() => { showChoices(); }, 5000); // 确认：5s 延迟
             };
         };
 
@@ -130,54 +145,48 @@
         function handleChoice(selectedId, selectedName) {
             const rt = Math.round(performance.now() - showChoiceTime);
             choiceGrid.style.display = 'none';
-            feedback.style.display = 'block';
-            trialCount++;
-
-            const isCorrect = (selectedId === currentTarget.id);
-            if (isCorrect) {
-                consecutiveCorrect++;
-                feedback.innerHTML = '✔';
-                feedback.className = 'correct';
-            } else {
-                consecutiveCorrect = 0;
-                feedback.innerHTML = '✘';
-                feedback.className = 'incorrect';
-            }
-
+            
             results.push({
-                Trial: trialCount,
-                Target_Name: currentTarget.name,
-                Selected_Name: selectedName,
-                Is_Correct: isCorrect ? 1 : 0,
-                Consec_Correct: consecutiveCorrect,
+                Trial: ++trialCount,
+                Target: currentTarget.name,
+                Selected: selectedName,
+                IsCorrect: (selectedId === currentTarget.id) ? 1 : 0,
+                ConsecCorrect: consecutiveCorrect,
                 RT_ms: rt
             });
 
+            // 核心修改：使用图片反馈
+            if (selectedId === currentTarget.id) {
+                consecutiveCorrect++;
+                feedbackImg.src = 'correct.png'; // 载入绿勾图
+            } else {
+                consecutiveCorrect = 0;
+                feedbackImg.src = 'incorrect.png'; // 载入红叉图
+            }
+            feedback.style.display = 'block';
+
             if (consecutiveCorrect >= CRITERION) {
-                statusText.innerText = `达标！连续做对 ${CRITERION} 次。`;
+                statusText.innerText = `达标！连续做对 ${CRITERION} 次，实验成功结束。`;
                 exportToCSV();
                 return;
             }
 
             setTimeout(() => {
                 feedback.style.display = 'none';
+                feedbackImg.src = ''; // 清空反馈图
                 startBtn.style.display = 'block';
-                statusText.innerText = `连对: ${consecutiveCorrect} | 点击继续`;
+                statusText.innerText = `当前连对: ${consecutiveCorrect} | 点击继续`;
             }, 5000);
         }
 
         function exportToCSV() {
             let csv = "Trial,Target,Selected,Correct,Consec,RT\n";
-            results.forEach(r => {
-                csv += `${r.Trial},${r.Target_Name},${r.Selected_Name},${r.Is_Correct},${r.Consec_Correct},${r.RT_ms}\n`;
-            });
+            results.forEach(r => csv += `${r.Trial},${r.Target},${r.Selected},${r.IsCorrect},${r.ConsecCorrect},${r.RT_ms}\n`);
             const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
             const link = document.createElement("a");
             link.href = URL.createObjectURL(blob);
             link.setAttribute("download", `data_trial_${trialCount}.csv`);
-            document.body.appendChild(link);
-            link.click();
-            document.body.removeChild(link);
+            document.body.appendChild(link); link.click(); document.body.removeChild(link);
         }
 
         window.onload = preload;
