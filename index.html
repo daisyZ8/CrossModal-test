@@ -3,33 +3,33 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>跨模态关联实验</title>
+    <title>跨模态关联实验 - 完整功能版</title>
     <style>
         body { margin: 0; background-color: #222; color: white; font-family: sans-serif; display: flex; flex-direction: column; justify-content: center; align-items: center; height: 100vh; overflow: hidden; user-select: none; -webkit-tap-highlight-color: transparent; }
         #start-btn { width: 120px; height: 120px; background-color: white; cursor: pointer; display: none; box-shadow: 0 0 20px rgba(255,255,255,0.2); z-index: 10; border-radius: 10px; }
         #choice-grid { display: none; grid-template-columns: repeat(3, 100px); grid-gap: 15px; }
         .stimulus-img { width: 90px; height: 90px; cursor: pointer; border: 3px solid transparent; border-radius: 8px; }
-        
-        /* 修改反馈图层样式，使其适应图片 */
         #feedback { display: none; position: absolute; pointer-events: none; z-index: 20; }
-        
-        /* 核心：反馈图片的尺寸设为 80px，保持视觉量感一致 */
-        #feedback-img { width: 80px; height: 80px; filter: drop-shadow(0 0 10px rgba(0,0,0,0.5)); }
-
+        #feedback-img { width: 85px; height: 85px; }
         #status-text { position: absolute; top: 10%; color: #aaa; text-align: center; width: 90%; font-size: 16px; line-height: 1.5; }
         #loader { font-size: 24px; color: #55acee; font-weight: bold; margin-bottom: 20px; }
-        #force-start { margin-top: 20px; padding: 10px 20px; background: #444; color: #888; border: none; border-radius: 5px; cursor: pointer; display: none; }
+        
+        /* 按钮样式 */
+        .control-btn { position: absolute; padding: 10px 15px; background: #333; color: #888; border: 1px solid #444; border-radius: 5px; cursor: pointer; font-size: 13px; z-index: 30; }
+        #force-start { bottom: 80px; display: none; }
+        #exit-btn { bottom: 20px; right: 20px; border-color: #552222; }
     </style>
 </head>
 <body>
 
-    <div id="status-text">正在加载实验资源...<br>请确保网络连接稳定</div>
+    <div id="status-text">正在准备实验资源...</div>
     <div id="loader">0%</div>
-    <button id="force-start" onclick="forceStart()">网络太慢？强制进入</button>
+    
+    <button id="force-start" class="control-btn" onclick="initExperiment()">网络较慢？点击强制进入</button>
+    <button id="exit-btn" class="control-btn" onclick="manualExit()">中途结束实验</button>
     
     <div id="start-btn"></div>
     <div id="choice-grid"></div>
-    
     <div id="feedback"><img id="feedback-img" src="" alt="feedback"></div>
 
     <script>
@@ -48,7 +48,7 @@
         const CRITERION = 20;
         
         let loadedCount = 0;
-        const totalAssets = stimuli.length * 2 + 2; // +2 是为了算上勾叉图片
+        const totalAssets = stimuli.length * 2 + 2; 
         let currentTarget = null;
         let showChoiceTime = 0;
 
@@ -56,41 +56,24 @@
             loadedCount++;
             const percent = Math.round((loadedCount / totalAssets) * 100);
             document.getElementById('loader').innerText = percent + "%";
-            
-            if (percent >= 30) {
-                document.getElementById('force-start').style.display = 'block';
-            }
-
-            if (loadedCount >= totalAssets) {
-                initExperiment();
-            }
-        }
-
-        // 优先加载反馈图
-        function preloadFeedback() {
-            const correctImg = new Image();
-            correctImg.onload = updateProgress;
-            correctImg.onerror = updateProgress;
-            correctImg.src = 'correct.png';
-
-            const incorrectImg = new Image();
-            incorrectImg.onload = updateProgress;
-            incorrectImg.onerror = updateProgress;
-            incorrectImg.src = 'incorrect.png';
+            if (percent >= 30) document.getElementById('force-start').style.display = 'block';
+            if (loadedCount >= totalAssets) initExperiment();
         }
 
         function preload() {
-            preloadFeedback(); // 先加载反馈图
-
+            // 加载反馈图
+            ['correct.png', 'incorrect.png'].forEach(src => {
+                const img = new Image();
+                img.onload = updateProgress; img.onerror = updateProgress;
+                img.src = src;
+            });
+            // 加载刺激物
             stimuli.forEach(item => {
                 const img = new Image();
-                img.onload = updateProgress;
-                img.onerror = updateProgress;
+                img.onload = updateProgress; img.onerror = updateProgress;
                 img.src = `${imagePath}${item.name}.png`;
-                
                 const audio = new Audio();
-                audio.oncanplaythrough = updateProgress;
-                audio.onerror = updateProgress;
+                audio.oncanplaythrough = updateProgress; audio.onerror = updateProgress;
                 audio.src = `${audioPath}${item.name}_Harm.wav`;
                 audio.load();
             });
@@ -103,10 +86,6 @@
             document.getElementById('status-text').innerHTML = "资源就绪<br>点击白色方块开始试次";
         }
 
-        function forceStart() {
-            initExperiment();
-        }
-
         const startBtn = document.getElementById('start-btn');
         const choiceGrid = document.getElementById('choice-grid');
         const feedback = document.getElementById('feedback');
@@ -117,13 +96,11 @@
             startBtn.style.display = 'none';
             statusText.innerText = "聆听声音刺激...";
             currentTarget = stimuli[Math.floor(Math.random() * stimuli.length)];
-            
             const audio = new Audio(`${audioPath}${currentTarget.name}_Harm.wav`);
             audio.play();
-
             audio.onended = () => {
                 statusText.innerText = "延迟期 (5s)";
-                setTimeout(() => { showChoices(); }, 5000); // 确认：5s 延迟
+                setTimeout(() => { showChoices(); }, 5000);
             };
         };
 
@@ -145,48 +122,73 @@
         function handleChoice(selectedId, selectedName) {
             const rt = Math.round(performance.now() - showChoiceTime);
             choiceGrid.style.display = 'none';
+            const isCorrect = (selectedId === currentTarget.id);
             
+            if (isCorrect) {
+                consecutiveCorrect++;
+                feedbackImg.src = 'correct.png';
+            } else {
+                consecutiveCorrect = 0;
+                feedbackImg.src = 'incorrect.png';
+            }
+            feedback.style.display = 'block';
+
             results.push({
                 Trial: ++trialCount,
                 Target: currentTarget.name,
                 Selected: selectedName,
-                IsCorrect: (selectedId === currentTarget.id) ? 1 : 0,
+                IsCorrect: isCorrect ? 1 : 0,
                 ConsecCorrect: consecutiveCorrect,
                 RT_ms: rt
             });
 
-            // 核心修改：使用图片反馈
-            if (selectedId === currentTarget.id) {
-                consecutiveCorrect++;
-                feedbackImg.src = 'correct.png'; // 载入绿勾图
-            } else {
-                consecutiveCorrect = 0;
-                feedbackImg.src = 'incorrect.png'; // 载入红叉图
-            }
-            feedback.style.display = 'block';
-
             if (consecutiveCorrect >= CRITERION) {
-                statusText.innerText = `达标！连续做对 ${CRITERION} 次，实验成功结束。`;
-                exportToCSV();
+                statusText.innerText = "实验达标结束！";
+                setTimeout(() => { exportToCSV(); }, 1000);
                 return;
             }
 
             setTimeout(() => {
                 feedback.style.display = 'none';
-                feedbackImg.src = ''; // 清空反馈图
                 startBtn.style.display = 'block';
                 statusText.innerText = `当前连对: ${consecutiveCorrect} | 点击继续`;
             }, 5000);
         }
 
+        // --- 中途退出功能 ---
+        function manualExit() {
+            if (confirm("确定要提前结束实验吗？")) {
+                if (results.length > 0) {
+                    if (confirm("是否下载已完成的实验数据？")) {
+                        exportToCSV();
+                    } else {
+                        location.reload(); // 不下载则直接刷新页面重置
+                    }
+                } else {
+                    alert("尚无实验数据。");
+                    location.reload();
+                }
+            }
+        }
+
         function exportToCSV() {
-            let csv = "Trial,Target,Selected,Correct,Consec,RT\n";
-            results.forEach(r => csv += `${r.Trial},${r.Target},${r.Selected},${r.IsCorrect},${r.ConsecCorrect},${r.RT_ms}\n`);
+            if (results.length === 0) return;
+            let csv = "\uFEFFTrial,Target,Selected,Correct,Consec,RT_ms\n";
+            results.forEach(r => {
+                csv += `${r.Trial},${r.Target},${r.Selected},${r.IsCorrect},${r.ConsecCorrect},${r.RT_ms}\n`;
+            });
             const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
             const link = document.createElement("a");
             link.href = URL.createObjectURL(blob);
-            link.setAttribute("download", `data_trial_${trialCount}.csv`);
-            document.body.appendChild(link); link.click(); document.body.removeChild(link);
+            link.setAttribute("download", `Experiment_Data_Trial${trialCount}.csv`);
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            // 下载后告知用户
+            setTimeout(() => {
+                alert("数据已下载，实验进程已重置。");
+                location.reload();
+            }, 500);
         }
 
         window.onload = preload;
