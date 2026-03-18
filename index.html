@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>跨模态关联实验</title>
+    <title>跨模态关联实验 - 错误重复版</title>
     <style>
         body { margin: 0; background-color: #222; color: white; font-family: sans-serif; display: flex; flex-direction: column; justify-content: center; align-items: center; height: 100vh; overflow: hidden; user-select: none; -webkit-tap-highlight-color: transparent; }
         #start-btn { width: 120px; height: 120px; background-color: white; cursor: pointer; display: none; box-shadow: 0 0 20px rgba(255,255,255,0.2); z-index: 10; border-radius: 10px; }
@@ -32,8 +32,7 @@
     <div id="feedback"><img id="feedback-img" src="" alt="feedback"></div>
 
     <script>
-        // --- 请确保这里的文件夹名称和你仓库里的一致 ---
-        const audioPath = 'Auditory_Stimuli_Pure_Smooth/'; 
+        const audioPath = 'Auditory_Stimuli_Pure/'; 
         const imagePath = 'Visual_Stimuli_Balanced/';
         
         const stimuli = [
@@ -51,8 +50,10 @@
         const LEARNING_CRITERION = 5;  
         const TESTING_CRITERION = 10;  
         
+        let repeatTarget = null; // 用于记录学习阶段需要重复的刺激
+        
         let loadedCount = 0;
-        const totalAssets = stimuli.length * 2 + 2; // 9图+9音+2反馈
+        const totalAssets = stimuli.length * 2 + 2; 
         let currentTarget = null;
         let showChoiceTime = 0;
         let audioContextUnlocked = false;
@@ -61,31 +62,21 @@
             loadedCount++;
             const percent = Math.round((loadedCount / totalAssets) * 100);
             document.getElementById('loader').innerText = percent + "%";
-            
-            // 策略：如果加载超过 90% 或者图片都好了，就允许进入，不硬等某些音轨
-            if (percent >= 95 || loadedCount >= (stimuli.length + 2)) {
-                initExperiment();
-            }
+            if (percent >= 95 || loadedCount >= (stimuli.length + 2)) initExperiment();
         }
 
         function preload() {
-            // 加载反馈图
             ['correct.png', 'incorrect.png'].forEach(src => {
                 const img = new Image();
                 img.onload = updateProgress; img.onerror = updateProgress;
                 img.src = src;
             });
-            // 加载图形
             stimuli.forEach(item => {
                 const img = new Image();
                 img.onload = updateProgress; img.onerror = updateProgress;
                 img.src = `${imagePath}${item.name}.png`;
-            });
-            // 加载音频 (增加超时和容错)
-            stimuli.forEach(item => {
                 const audio = new Audio();
-                audio.oncanplaythrough = updateProgress; 
-                audio.onerror = updateProgress; // 报错也跳过，防止卡死
+                audio.oncanplaythrough = updateProgress; audio.onerror = updateProgress;
                 audio.src = `${audioPath}${item.name}_Harm.wav`;
                 audio.load();
             });
@@ -98,14 +89,11 @@
             document.getElementById('status-text').innerHTML = "资源就绪<br>点击白色方块开始试次";
         }
 
-        // 核心：解锁音频权限
         function unlockAudio() {
             if (audioContextUnlocked) return;
             const silentAudio = new Audio();
             silentAudio.src = "data:audio/wav;base64,UklGRigAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQQAAAAAAA==";
-            silentAudio.play().then(() => {
-                audioContextUnlocked = true;
-            }).catch(e => console.log("Audio unlock wait"));
+            silentAudio.play().then(() => { audioContextUnlocked = true; }).catch(e => {});
         }
 
         const startBtn = document.getElementById('start-btn');
@@ -116,16 +104,20 @@
         const phaseTag = document.getElementById('phase-tag');
 
         startBtn.onclick = function() {
-            unlockAudio(); // 每次点开始都尝试解锁
+            unlockAudio();
             startBtn.style.display = 'none';
-            statusText.innerText = "聆听声音刺激...";
             
-            currentTarget = stimuli[Math.floor(Math.random() * stimuli.length)];
+            // --- Error Repeat 逻辑 ---
+            if (!isTestPhase && repeatTarget) {
+                currentTarget = repeatTarget;
+                statusText.innerText = "重新尝试刚才的刺激...";
+            } else {
+                currentTarget = stimuli[Math.floor(Math.random() * stimuli.length)];
+                statusText.innerText = "聆听声音刺激...";
+            }
+            
             const audio = new Audio(`${audioPath}${currentTarget.name}_Harm.wav`);
-            
             audio.play().catch(e => {
-                console.error("播放失败:", e);
-                statusText.innerText = "播放异常，尝试重新点击...";
                 startBtn.style.display = 'block';
             });
 
@@ -160,6 +152,7 @@
                 feedbackImg.src = 'correct.png';
                 if (!isTestPhase) {
                     consecutiveCorrect++;
+                    repeatTarget = null; // 做对了，清空重复目标
                     if (consecutiveCorrect >= LEARNING_CRITERION) {
                         isTestPhase = true;
                         testPhaseCorrect = 0;
@@ -172,8 +165,12 @@
                 }
             } else {
                 feedbackImg.src = 'incorrect.png';
-                if (!isTestPhase) consecutiveCorrect = 0;
-                else testPhaseCorrect = 0;
+                if (!isTestPhase) {
+                    consecutiveCorrect = 0;
+                    repeatTarget = currentTarget; // 学习阶段做错，记录当前目标下次重复
+                } else {
+                    testPhaseCorrect = 0;
+                }
             }
             
             feedback.style.display = 'block';
@@ -184,6 +181,7 @@
                 Target: currentTarget.name,
                 Selected: selectedName,
                 IsCorrect: isCorrect ? 1 : 0,
+                IsRepeat: (!isTestPhase && repeatTarget && !isCorrect) ? "NextIsRepeat" : "No",
                 PhaseConsec: isTestPhase ? testPhaseCorrect : consecutiveCorrect,
                 RT_ms: rt
             });
@@ -199,7 +197,7 @@
                 startBtn.style.display = 'block';
                 const countText = isTestPhase ? `测试进度: ${testPhaseCorrect}/${TESTING_CRITERION}` : `学习进度: ${consecutiveCorrect}/${LEARNING_CRITERION}`;
                 statusText.innerText = `${countText} | 点击继续`;
-            }, 2000); // 反馈时间改为2秒，减少等待感
+            }, 2000); 
         }
 
         function manualExit() {
@@ -210,9 +208,9 @@
         }
 
         function exportToCSV() {
-            let csv = "\uFEFFTrial,Phase,Target,Selected,Correct,PhaseConsec,RT_ms\n";
+            let csv = "\uFEFFTrial,Phase,Target,Selected,Correct,IsRepeat,PhaseConsec,RT_ms\n";
             results.forEach(r => {
-                csv += `${r.Trial},${r.Phase},${r.Target},${r.Selected},${r.IsCorrect},${r.PhaseConsec},${r.RT_ms}\n`;
+                csv += `${r.Trial},${r.Phase},${r.Target},${r.Selected},${r.IsCorrect},${r.IsRepeat},${r.PhaseConsec},${r.RT_ms}\n`;
             });
             const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
             const link = document.createElement("a");
