@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>跨模态关联实验 - 完整功能版</title>
+    <title>跨模态关联实验 - 进阶测试版</title>
     <style>
         body { margin: 0; background-color: #222; color: white; font-family: sans-serif; display: flex; flex-direction: column; justify-content: center; align-items: center; height: 100vh; overflow: hidden; user-select: none; -webkit-tap-highlight-color: transparent; }
         #start-btn { width: 120px; height: 120px; background-color: white; cursor: pointer; display: none; box-shadow: 0 0 20px rgba(255,255,255,0.2); z-index: 10; border-radius: 10px; }
@@ -14,18 +14,17 @@
         #status-text { position: absolute; top: 10%; color: #aaa; text-align: center; width: 90%; font-size: 16px; line-height: 1.5; }
         #loader { font-size: 24px; color: #55acee; font-weight: bold; margin-bottom: 20px; }
         
-        /* 按钮样式 */
-        .control-btn { position: absolute; padding: 10px 15px; background: #333; color: #888; border: 1px solid #444; border-radius: 5px; cursor: pointer; font-size: 13px; z-index: 30; }
-        #force-start { bottom: 80px; display: none; }
+        .control-btn { position: fixed; padding: 10px 15px; background: #333; color: #888; border: 1px solid #444; border-radius: 5px; cursor: pointer; font-size: 13px; z-index: 30; }
         #exit-btn { bottom: 20px; right: 20px; border-color: #552222; }
+        #phase-tag { position: absolute; top: 20px; left: 20px; font-size: 12px; color: #55acee; padding: 5px 10px; border: 1px solid #55acee; border-radius: 3px; }
     </style>
 </head>
 <body>
 
+    <div id="phase-tag">阶段 1：学习 (需连对5次)</div>
     <div id="status-text">正在准备实验资源...</div>
     <div id="loader">0%</div>
     
-    <button id="force-start" class="control-btn" onclick="initExperiment()">网络较慢？点击强制进入</button>
     <button id="exit-btn" class="control-btn" onclick="manualExit()">中途结束实验</button>
     
     <div id="start-btn"></div>
@@ -42,10 +41,15 @@
             { id: 7, name: 'S7_Triangle_Blue' }, { id: 8, name: 'S8_Triangle_Yellow' }, { id: 9, name: 'S9_Triangle_Red' }
         ];
 
+        // --- 逻辑变量 ---
         let results = []; 
         let trialCount = 0;
-        let consecutiveCorrect = 0;
-        const CRITERION = 20;
+        let consecutiveCorrect = 0; // 全局连对（用于进入测试阶段）
+        let testPhaseCorrect = 0;   // 测试阶段专用的连对计数
+        let isTestPhase = false;    // 是否已进入测试阶段
+        
+        const LEARNING_CRITERION = 5;  // 学习阶段连对5次跳转
+        const TESTING_CRITERION = 10;  // 测试阶段连对10次结束
         
         let loadedCount = 0;
         const totalAssets = stimuli.length * 2 + 2; 
@@ -56,18 +60,15 @@
             loadedCount++;
             const percent = Math.round((loadedCount / totalAssets) * 100);
             document.getElementById('loader').innerText = percent + "%";
-            if (percent >= 30) document.getElementById('force-start').style.display = 'block';
             if (loadedCount >= totalAssets) initExperiment();
         }
 
         function preload() {
-            // 加载反馈图
             ['correct.png', 'incorrect.png'].forEach(src => {
                 const img = new Image();
                 img.onload = updateProgress; img.onerror = updateProgress;
                 img.src = src;
             });
-            // 加载刺激物
             stimuli.forEach(item => {
                 const img = new Image();
                 img.onload = updateProgress; img.onerror = updateProgress;
@@ -81,7 +82,6 @@
 
         function initExperiment() {
             document.getElementById('loader').style.display = 'none';
-            document.getElementById('force-start').style.display = 'none';
             document.getElementById('start-btn').style.display = 'block';
             document.getElementById('status-text').innerHTML = "资源就绪<br>点击白色方块开始试次";
         }
@@ -91,6 +91,7 @@
         const feedback = document.getElementById('feedback');
         const feedbackImg = document.getElementById('feedback-img');
         const statusText = document.getElementById('status-text');
+        const phaseTag = document.getElementById('phase-tag');
 
         startBtn.onclick = function() {
             startBtn.style.display = 'none';
@@ -99,8 +100,9 @@
             const audio = new Audio(`${audioPath}${currentTarget.name}_Harm.wav`);
             audio.play();
             audio.onended = () => {
-                statusText.innerText = "延迟期 (5s)";
-                setTimeout(() => { showChoices(); }, 5000);
+                const delay = isTestPhase ? 5000 : 1000;
+                statusText.innerText = `延迟期 (${delay/1000}s)`;
+                setTimeout(() => { showChoices(); }, delay);
             };
         };
 
@@ -125,25 +127,44 @@
             const isCorrect = (selectedId === currentTarget.id);
             
             if (isCorrect) {
-                consecutiveCorrect++;
                 feedbackImg.src = 'correct.png';
+                if (!isTestPhase) {
+                    consecutiveCorrect++;
+                    // 检查是否跳转
+                    if (consecutiveCorrect >= LEARNING_CRITERION) {
+                        isTestPhase = true;
+                        testPhaseCorrect = 0; // 进入测试阶段，重新开始计数
+                        phaseTag.innerText = "阶段 2：测试 (需连对10次)";
+                        phaseTag.style.color = "#ffcc00";
+                        phaseTag.style.borderColor = "#ffcc00";
+                    }
+                } else {
+                    testPhaseCorrect++;
+                }
             } else {
-                consecutiveCorrect = 0;
                 feedbackImg.src = 'incorrect.png';
+                if (!isTestPhase) {
+                    consecutiveCorrect = 0; // 学习阶段做错，重置计数
+                } else {
+                    testPhaseCorrect = 0;   // 测试阶段做错，只重置本阶段计数，不回退阶段
+                }
             }
+            
             feedback.style.display = 'block';
 
             results.push({
                 Trial: ++trialCount,
+                Phase: isTestPhase ? "Testing" : "Learning",
                 Target: currentTarget.name,
                 Selected: selectedName,
                 IsCorrect: isCorrect ? 1 : 0,
-                ConsecCorrect: consecutiveCorrect,
+                PhaseConsec: isTestPhase ? testPhaseCorrect : consecutiveCorrect,
                 RT_ms: rt
             });
 
-            if (consecutiveCorrect >= CRITERION) {
-                statusText.innerText = "实验达标结束！";
+            // 最终结束判定
+            if (isTestPhase && testPhaseCorrect >= TESTING_CRITERION) {
+                statusText.innerText = "测试完成，实验结束！";
                 setTimeout(() => { exportToCSV(); }, 1000);
                 return;
             }
@@ -151,44 +172,31 @@
             setTimeout(() => {
                 feedback.style.display = 'none';
                 startBtn.style.display = 'block';
-                statusText.innerText = `当前连对: ${consecutiveCorrect} | 点击继续`;
+                const countText = isTestPhase ? `测试进度: ${testPhaseCorrect}/${TESTING_CRITERION}` : `学习进度: ${consecutiveCorrect}/${LEARNING_CRITERION}`;
+                statusText.innerText = `${countText} | 点击继续`;
             }, 5000);
         }
 
-        // --- 中途退出功能 ---
         function manualExit() {
-            if (confirm("确定要提前结束实验吗？")) {
-                if (results.length > 0) {
-                    if (confirm("是否下载已完成的实验数据？")) {
-                        exportToCSV();
-                    } else {
-                        location.reload(); // 不下载则直接刷新页面重置
-                    }
-                } else {
-                    alert("尚无实验数据。");
-                    location.reload();
-                }
+            if (confirm("确定要提前结束实验并导出当前数据吗？")) {
+                if (results.length > 0) exportToCSV();
+                else location.reload();
             }
         }
 
         function exportToCSV() {
-            if (results.length === 0) return;
-            let csv = "\uFEFFTrial,Target,Selected,Correct,Consec,RT_ms\n";
+            let csv = "\uFEFFTrial,Phase,Target,Selected,Correct,PhaseConsec,RT_ms\n";
             results.forEach(r => {
-                csv += `${r.Trial},${r.Target},${r.Selected},${r.IsCorrect},${r.ConsecCorrect},${r.RT_ms}\n`;
+                csv += `${r.Trial},${r.Phase},${r.Target},${r.Selected},${r.IsCorrect},${r.PhaseConsec},${r.RT_ms}\n`;
             });
             const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
             const link = document.createElement("a");
             link.href = URL.createObjectURL(blob);
-            link.setAttribute("download", `Experiment_Data_Trial${trialCount}.csv`);
+            link.setAttribute("download", `Exp_Data_Phases_${trialCount}.csv`);
             document.body.appendChild(link);
             link.click();
             document.body.removeChild(link);
-            // 下载后告知用户
-            setTimeout(() => {
-                alert("数据已下载，实验进程已重置。");
-                location.reload();
-            }, 500);
+            setTimeout(() => { location.reload(); }, 500);
         }
 
         window.onload = preload;
