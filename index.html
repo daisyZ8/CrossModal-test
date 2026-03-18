@@ -2,8 +2,8 @@
 <html lang="zh">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>跨模态关联实验 - 进阶测试版</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>跨模态关联实验 - 兼容优化版</title>
     <style>
         body { margin: 0; background-color: #222; color: white; font-family: sans-serif; display: flex; flex-direction: column; justify-content: center; align-items: center; height: 100vh; overflow: hidden; user-select: none; -webkit-tap-highlight-color: transparent; }
         #start-btn { width: 120px; height: 120px; background-color: white; cursor: pointer; display: none; box-shadow: 0 0 20px rgba(255,255,255,0.2); z-index: 10; border-radius: 10px; }
@@ -32,7 +32,8 @@
     <div id="feedback"><img id="feedback-img" src="" alt="feedback"></div>
 
     <script>
-        const audioPath = 'Auditory_Stimuli_Pure_Smooth/'; 
+        // --- 请确保这里的文件夹名称和你仓库里的一致 ---
+        const audioPath = 'Auditory_Stimuli_Harmonics/'; 
         const imagePath = 'Visual_Stimuli_Balanced/';
         
         const stimuli = [
@@ -41,82 +42,70 @@
             { id: 7, name: 'S7_Triangle_Blue' }, { id: 8, name: 'S8_Triangle_Yellow' }, { id: 9, name: 'S9_Triangle_Red' }
         ];
 
-        // --- 逻辑变量 ---
         let results = []; 
         let trialCount = 0;
-        let consecutiveCorrect = 0; // 全局连对（用于进入测试阶段）
-        let testPhaseCorrect = 0;   // 测试阶段专用的连对计数
-        let isTestPhase = false;    // 是否已进入测试阶段
+        let consecutiveCorrect = 0; 
+        let testPhaseCorrect = 0;   
+        let isTestPhase = false;    
         
-        const LEARNING_CRITERION = 5;  // 学习阶段连对5次跳转
-        const TESTING_CRITERION = 10;  // 测试阶段连对10次结束
+        const LEARNING_CRITERION = 5;  
+        const TESTING_CRITERION = 10;  
         
         let loadedCount = 0;
-        const totalAssets = stimuli.length * 2 + 2; 
+        const totalAssets = stimuli.length * 2 + 2; // 9图+9音+2反馈
         let currentTarget = null;
         let showChoiceTime = 0;
-
-        // --- 修改后的加载逻辑 ---
-        function preload() {
-            const feedbackImages = ['correct.png', 'incorrect.png'];
-            
-            // 1. 先加载反馈图
-            feedbackImages.forEach(src => {
-                const img = new Image();
-                img.onload = updateProgress;
-                img.onerror = updateProgress;
-                img.src = src;
-            });
-
-            // 2. 加载 9 张刺激图形
-            stimuli.forEach(item => {
-                const img = new Image();
-                img.onload = updateProgress;
-                img.onerror = updateProgress;
-                img.src = `${imagePath}${item.name}.png`;
-            });
-
-            // 3. 音频在移动端不进行强行预加载，改为“尝试性加载”
-            // 这样即使音频卡住，只要图片好了（大概占总进度的 60%），我们也可以让用户强制开始
-            stimuli.forEach(item => {
-                const audio = new Audio();
-                audio.oncanplaythrough = updateProgress;
-                audio.onerror = updateProgress; // 即使报错也继续，防止死锁
-                audio.src = `${audioPath}${item.name}_Harm.wav`;
-                audio.load();
-            });
-        }
+        let audioContextUnlocked = false;
 
         function updateProgress() {
             loadedCount++;
             const percent = Math.round((loadedCount / totalAssets) * 100);
             document.getElementById('loader').innerText = percent + "%";
             
-            // 策略调整：只要加载超过 50%（通常此时图片已全好），就显示强制进入按钮
-            if (percent >= 50) {
-                document.getElementById('force-start').style.display = 'block';
-            }
-            
-            if (loadedCount >= totalAssets) {
+            // 策略：如果加载超过 90% 或者图片都好了，就允许进入，不硬等某些音轨
+            if (percent >= 95 || loadedCount >= (stimuli.length + 2)) {
                 initExperiment();
             }
         }
 
-        function initExperiment() {
-            // 解锁移动端音频环境
-            const unlockAudio = () => {
-                const silentAudio = new Audio();
-                silentAudio.play().catch(()=>{}); 
-                window.removeEventListener('click', unlockAudio);
-                window.removeEventListener('touchstart', unlockAudio);
-            };
-            window.addEventListener('click', unlockAudio);
-            window.addEventListener('touchstart', unlockAudio);
+        function preload() {
+            // 加载反馈图
+            ['correct.png', 'incorrect.png'].forEach(src => {
+                const img = new Image();
+                img.onload = updateProgress; img.onerror = updateProgress;
+                img.src = src;
+            });
+            // 加载图形
+            stimuli.forEach(item => {
+                const img = new Image();
+                img.onload = updateProgress; img.onerror = updateProgress;
+                img.src = `${imagePath}${item.name}.png`;
+            });
+            // 加载音频 (增加超时和容错)
+            stimuli.forEach(item => {
+                const audio = new Audio();
+                audio.oncanplaythrough = updateProgress; 
+                audio.onerror = updateProgress; // 报错也跳过，防止卡死
+                audio.src = `${audioPath}${item.name}_Harm.wav`;
+                audio.load();
+            });
+        }
 
+        function initExperiment() {
+            if (document.getElementById('start-btn').style.display === 'block') return;
             document.getElementById('loader').style.display = 'none';
-            document.getElementById('force-start').style.display = 'none';
             document.getElementById('start-btn').style.display = 'block';
             document.getElementById('status-text').innerHTML = "资源就绪<br>点击白色方块开始试次";
+        }
+
+        // 核心：解锁音频权限
+        function unlockAudio() {
+            if (audioContextUnlocked) return;
+            const silentAudio = new Audio();
+            silentAudio.src = "data:audio/wav;base64,UklGRigAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQQAAAAAAA==";
+            silentAudio.play().then(() => {
+                audioContextUnlocked = true;
+            }).catch(e => console.log("Audio unlock wait"));
         }
 
         const startBtn = document.getElementById('start-btn');
@@ -127,11 +116,19 @@
         const phaseTag = document.getElementById('phase-tag');
 
         startBtn.onclick = function() {
+            unlockAudio(); // 每次点开始都尝试解锁
             startBtn.style.display = 'none';
             statusText.innerText = "聆听声音刺激...";
+            
             currentTarget = stimuli[Math.floor(Math.random() * stimuli.length)];
             const audio = new Audio(`${audioPath}${currentTarget.name}_Harm.wav`);
-            audio.play();
+            
+            audio.play().catch(e => {
+                console.error("播放失败:", e);
+                statusText.innerText = "播放异常，尝试重新点击...";
+                startBtn.style.display = 'block';
+            });
+
             audio.onended = () => {
                 const delay = isTestPhase ? 5000 : 1000;
                 statusText.innerText = `延迟期 (${delay/1000}s)`;
@@ -163,10 +160,9 @@
                 feedbackImg.src = 'correct.png';
                 if (!isTestPhase) {
                     consecutiveCorrect++;
-                    // 检查是否跳转
                     if (consecutiveCorrect >= LEARNING_CRITERION) {
                         isTestPhase = true;
-                        testPhaseCorrect = 0; // 进入测试阶段，重新开始计数
+                        testPhaseCorrect = 0;
                         phaseTag.innerText = "阶段 2：测试 (需连对10次)";
                         phaseTag.style.color = "#ffcc00";
                         phaseTag.style.borderColor = "#ffcc00";
@@ -176,11 +172,8 @@
                 }
             } else {
                 feedbackImg.src = 'incorrect.png';
-                if (!isTestPhase) {
-                    consecutiveCorrect = 0; // 学习阶段做错，重置计数
-                } else {
-                    testPhaseCorrect = 0;   // 测试阶段做错，只重置本阶段计数，不回退阶段
-                }
+                if (!isTestPhase) consecutiveCorrect = 0;
+                else testPhaseCorrect = 0;
             }
             
             feedback.style.display = 'block';
@@ -195,7 +188,6 @@
                 RT_ms: rt
             });
 
-            // 最终结束判定
             if (isTestPhase && testPhaseCorrect >= TESTING_CRITERION) {
                 statusText.innerText = "测试完成，实验结束！";
                 setTimeout(() => { exportToCSV(); }, 1000);
@@ -207,7 +199,7 @@
                 startBtn.style.display = 'block';
                 const countText = isTestPhase ? `测试进度: ${testPhaseCorrect}/${TESTING_CRITERION}` : `学习进度: ${consecutiveCorrect}/${LEARNING_CRITERION}`;
                 statusText.innerText = `${countText} | 点击继续`;
-            }, 5000);
+            }, 2000); // 反馈时间改为2秒，减少等待感
         }
 
         function manualExit() {
@@ -225,7 +217,7 @@
             const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
             const link = document.createElement("a");
             link.href = URL.createObjectURL(blob);
-            link.setAttribute("download", `Exp_Data_Phases_${trialCount}.csv`);
+            link.setAttribute("download", `Exp_Data_${new Date().getTime()}.csv`);
             document.body.appendChild(link);
             link.click();
             document.body.removeChild(link);
