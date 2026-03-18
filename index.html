@@ -56,32 +56,65 @@
         let currentTarget = null;
         let showChoiceTime = 0;
 
-        function updateProgress() {
-            loadedCount++;
-            const percent = Math.round((loadedCount / totalAssets) * 100);
-            document.getElementById('loader').innerText = percent + "%";
-            if (loadedCount >= totalAssets) initExperiment();
-        }
-
+        // --- 修改后的加载逻辑 ---
         function preload() {
-            ['correct.png', 'incorrect.png'].forEach(src => {
+            const feedbackImages = ['correct.png', 'incorrect.png'];
+            
+            // 1. 先加载反馈图
+            feedbackImages.forEach(src => {
                 const img = new Image();
-                img.onload = updateProgress; img.onerror = updateProgress;
+                img.onload = updateProgress;
+                img.onerror = updateProgress;
                 img.src = src;
             });
+
+            // 2. 加载 9 张刺激图形
             stimuli.forEach(item => {
                 const img = new Image();
-                img.onload = updateProgress; img.onerror = updateProgress;
+                img.onload = updateProgress;
+                img.onerror = updateProgress;
                 img.src = `${imagePath}${item.name}.png`;
+            });
+
+            // 3. 音频在移动端不进行强行预加载，改为“尝试性加载”
+            // 这样即使音频卡住，只要图片好了（大概占总进度的 60%），我们也可以让用户强制开始
+            stimuli.forEach(item => {
                 const audio = new Audio();
-                audio.oncanplaythrough = updateProgress; audio.onerror = updateProgress;
+                audio.oncanplaythrough = updateProgress;
+                audio.onerror = updateProgress; // 即使报错也继续，防止死锁
                 audio.src = `${audioPath}${item.name}_Harm.wav`;
                 audio.load();
             });
         }
 
+        function updateProgress() {
+            loadedCount++;
+            const percent = Math.round((loadedCount / totalAssets) * 100);
+            document.getElementById('loader').innerText = percent + "%";
+            
+            // 策略调整：只要加载超过 50%（通常此时图片已全好），就显示强制进入按钮
+            if (percent >= 50) {
+                document.getElementById('force-start').style.display = 'block';
+            }
+            
+            if (loadedCount >= totalAssets) {
+                initExperiment();
+            }
+        }
+
         function initExperiment() {
+            // 解锁移动端音频环境
+            const unlockAudio = () => {
+                const silentAudio = new Audio();
+                silentAudio.play().catch(()=>{}); 
+                window.removeEventListener('click', unlockAudio);
+                window.removeEventListener('touchstart', unlockAudio);
+            };
+            window.addEventListener('click', unlockAudio);
+            window.addEventListener('touchstart', unlockAudio);
+
             document.getElementById('loader').style.display = 'none';
+            document.getElementById('force-start').style.display = 'none';
             document.getElementById('start-btn').style.display = 'block';
             document.getElementById('status-text').innerHTML = "资源就绪<br>点击白色方块开始试次";
         }
