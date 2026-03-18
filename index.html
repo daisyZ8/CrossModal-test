@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>跨模态关联实验</title>
+    <title>跨模态关联实验 - 稳定重复版</title>
     <style>
         body { margin: 0; background-color: #222; color: white; font-family: sans-serif; display: flex; flex-direction: column; justify-content: center; align-items: center; height: 100vh; overflow: hidden; user-select: none; -webkit-tap-highlight-color: transparent; }
         #start-btn { width: 120px; height: 120px; background-color: white; cursor: pointer; display: none; box-shadow: 0 0 20px rgba(255,255,255,0.2); z-index: 10; border-radius: 10px; }
@@ -13,7 +13,6 @@
         #feedback-img { width: 85px; height: 85px; }
         #status-text { position: absolute; top: 10%; color: #aaa; text-align: center; width: 90%; font-size: 16px; line-height: 1.5; }
         #loader { font-size: 24px; color: #55acee; font-weight: bold; margin-bottom: 20px; }
-        
         .control-btn { position: fixed; padding: 10px 15px; background: #333; color: #888; border: 1px solid #444; border-radius: 5px; cursor: pointer; font-size: 13px; z-index: 30; }
         #exit-btn { bottom: 20px; right: 20px; border-color: #552222; }
         #phase-tag { position: absolute; top: 20px; left: 20px; font-size: 12px; color: #55acee; padding: 5px 10px; border: 1px solid #55acee; border-radius: 3px; }
@@ -46,11 +45,10 @@
         let consecutiveCorrect = 0; 
         let testPhaseCorrect = 0;   
         let isTestPhase = false;    
+        let repeatTarget = null; 
         
         const LEARNING_CRITERION = 5;  
         const TESTING_CRITERION = 10;  
-        
-        let repeatTarget = null; // 用于记录学习阶段需要重复的刺激
         
         let loadedCount = 0;
         const totalAssets = stimuli.length * 2 + 2; 
@@ -107,7 +105,7 @@
             unlockAudio();
             startBtn.style.display = 'none';
             
-            // --- Error Repeat 逻辑 ---
+            // 确定目标：优先检查重复逻辑
             if (!isTestPhase && repeatTarget) {
                 currentTarget = repeatTarget;
                 statusText.innerText = "重新尝试刚才的刺激...";
@@ -117,18 +115,23 @@
             }
             
             const audio = new Audio(`${audioPath}${currentTarget.name}_Harm.wav`);
-            audio.play().catch(e => {
-                startBtn.style.display = 'block';
-            });
-
-            audio.onended = () => {
+            
+            // 使用 addEventListener 替代直接赋值，增加兼容性
+            audio.addEventListener('ended', () => {
                 const delay = isTestPhase ? 5000 : 1000;
                 statusText.innerText = `延迟期 (${delay/1000}s)`;
-                setTimeout(() => { showChoices(); }, delay);
-            };
+                setTimeout(showChoices, delay);
+            });
+
+            audio.play().catch(e => {
+                console.error("音频播放被拦截", e);
+                // 如果播放失败，直接进入延迟期，防止流程卡死
+                setTimeout(showChoices, 1000); 
+            });
         };
 
         function showChoices() {
+            if (!currentTarget) return;
             choiceGrid.innerHTML = '';
             statusText.innerText = "请选择对应的图形";
             const displayOrder = [...stimuli].sort(() => Math.random() - 0.5);
@@ -152,10 +155,11 @@
                 feedbackImg.src = 'correct.png';
                 if (!isTestPhase) {
                     consecutiveCorrect++;
-                    repeatTarget = null; // 做对了，清空重复目标
+                    repeatTarget = null; // 成功后清除重复标记
                     if (consecutiveCorrect >= LEARNING_CRITERION) {
                         isTestPhase = true;
                         testPhaseCorrect = 0;
+                        repeatTarget = null; // 进阶段强制清空
                         phaseTag.innerText = "阶段 2：测试 (需连对10次)";
                         phaseTag.style.color = "#ffcc00";
                         phaseTag.style.borderColor = "#ffcc00";
@@ -167,7 +171,7 @@
                 feedbackImg.src = 'incorrect.png';
                 if (!isTestPhase) {
                     consecutiveCorrect = 0;
-                    repeatTarget = currentTarget; // 学习阶段做错，记录当前目标下次重复
+                    repeatTarget = currentTarget; // 错误后记录，下次重复
                 } else {
                     testPhaseCorrect = 0;
                 }
@@ -181,14 +185,14 @@
                 Target: currentTarget.name,
                 Selected: selectedName,
                 IsCorrect: isCorrect ? 1 : 0,
-                IsRepeat: (!isTestPhase && repeatTarget && !isCorrect) ? "NextIsRepeat" : "No",
+                IsRepeat: (repeatTarget && !isCorrect && !isTestPhase) ? "Yes" : "No",
                 PhaseConsec: isTestPhase ? testPhaseCorrect : consecutiveCorrect,
                 RT_ms: rt
             });
 
             if (isTestPhase && testPhaseCorrect >= TESTING_CRITERION) {
                 statusText.innerText = "测试完成，实验结束！";
-                setTimeout(() => { exportToCSV(); }, 1000);
+                setTimeout(exportToCSV, 1000);
                 return;
             }
 
